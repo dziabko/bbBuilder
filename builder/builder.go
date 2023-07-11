@@ -65,6 +65,12 @@ type Builder struct {
 	executionPayloadCache map[uint64]engine.ExecutableData
 }
 
+// ExecutionPayload represents an execution layer payload.
+type LocalExecutionPayload struct {
+	A         capella.ExecutionPayload
+	ExtraData [32]byte `ssz-max:"32"`
+}
+
 func NewBuilder(sk *bls.SecretKey, beaconClient *beacon.MultiBeaconClient, relay IRelay, builderSigningDomain bbTypes.Domain, eth IEthService, rpbs *RPBS.RPBSService, database *database.DatabaseService, config *Config) (*Builder, error) {
 	pkBytes := bls.PublicKeyFromSecretKey(sk).Compress()
 	pk := commonTypes.PublicKey{}
@@ -433,8 +439,7 @@ func (b *Builder) ProcessBuilderBid(attrs *builderTypes.BuilderPayloadAttributes
 				delete(b.executionPayloadCache, slot)
 			}
 		}
-	}// Else block bid submission is for the same slot as known
-	
+	} // Else block bid submission is for the same slot as known
 
 	log.Info("Received block attributes", "slot", attrs.Slot, "timestamp", attrs.Timestamp, "head hash", attrs.HeadHash, "fee recipient", attrs.SuggestedFeeRecipient, "bid amount", attrs.BidAmount)
 
@@ -466,9 +471,7 @@ func (b *Builder) ProcessBuilderBid(attrs *builderTypes.BuilderPayloadAttributes
 	b.slotAttrs = append(b.slotAttrs, *attrs)
 	// Can be used later to keep track of the different bids for the same slot by the same user
 
-
 	b.slotMu.Unlock()
-
 
 	attrs.PayoutPoolAddress = b.relay.GetPayoutAddress()
 
@@ -721,9 +724,11 @@ func (b *Builder) prepareBlock(slotCtx context.Context, proposerPubkey commonTyp
 	return builderTypes.BuilderBlockBid{}, fmt.Errorf("context cancelled")
 }
 
-func (b *Builder) SubmitBlindedBlock(blindedBlock capellaApi.BlindedBeaconBlock, signature phase0.BLSSignature) (capella.ExecutionPayload, error) {
+// Send partially blinded block with encrypted messages
+func (b *Builder) SubmitBlindedBlock(blindedBlock capellaApi.BlindedBeaconBlock, signature phase0.BLSSignature) (ExecutionPayload, error) {
 
 	var executionPayload capella.ExecutionPayload
+	var localExecutionPayload LocalExecutionPayload
 	var beaconBlock beaconTypes.SignedBeaconBlock
 
 	slot := uint64(blindedBlock.Slot)
@@ -733,7 +738,7 @@ func (b *Builder) SubmitBlindedBlock(blindedBlock capellaApi.BlindedBeaconBlock,
 	b.slotMu.Unlock()
 
 	if !exists {
-		return capella.ExecutionPayload{}, errors.New("execution payload not found")
+		return ExecutionPayload{}, errors.New("execution payload not found")
 	}
 
 	log.Info("executionPayload found", "slot", slot, "hash", executableData.BlockHash.String())
@@ -745,7 +750,7 @@ func (b *Builder) SubmitBlindedBlock(blindedBlock capellaApi.BlindedBeaconBlock,
 
 	// Block hash is unique to the block, so we can use it to verify that the block has not been modified
 	if blindedBlock.Body.ExecutionPayloadHeader.BlockHash.String() != executableData.BlockHash.String() {
-		return capella.ExecutionPayload{}, errors.New("Block hash has been changed from the expected value, block has been modified")
+		return ExecutionPayload{}, errors.New("Block hash has been changed from the expected value, block has been modified")
 	}
 
 	if b.MetricsEnabled {
@@ -791,6 +796,11 @@ func (b *Builder) SubmitBlindedBlock(blindedBlock capellaApi.BlindedBeaconBlock,
 		BlockHash:     blindedBlock.Body.ExecutionPayloadHeader.BlockHash,
 		Withdrawals:   withdrawals,
 		Transactions:  transactions,
+	}
+
+	localExecutionPayload = LocalExecutionPayload{
+		A:         executionPayload,
+		ExtraData: [32]byte(executionPayload.ExtraData), //blindedBlock.Body.ExecutionPayloadHeader.ExtraData,
 	}
 
 	beaconBlock = beaconTypes.SignedBeaconBlock{
