@@ -448,3 +448,19 @@ The go-ethereum binaries (i.e. all code inside of the `cmd` directory) are licen
 included in our repository in the `COPYING` file.
 
 The builder (under the `/builder/` directory) is licensed under WTFPL license defined in the following [file](./License).
+
+
+## Notes
+I first familiarized myself with the builder service as we are trying to modify the execution layer block that is being built 
+
+To do this we notice that we have a Builder service defined in the builder/builder.go directory, where we can find its implementation of various methods that involve processing the builder bid, preparing the block, and submitting the blinded block. 
+
+Here we can also see the implementation of ExtraData used in the ExecutionPayload which is the additional data field for each proposed block by the block builder 
+
+We clearly have the ExtraData defined as an unbounded byte array, meanwhile in the eth2.0 doccumentation, it defines ExtraData at most 32 bytes 
+
+What we can do here is redefine the ExecutionPayload.ExtraData field to ensure that we can only assign at most 32 bytes to it 
+
+I have created localExecutionPayload struct in the builder service that overwrites the ExtraData field to a [32]byte array. This is in line with what is defined in page 5 of the ETH yellow paper (https://ethereum.org/615606b8e1e1da72687e66dba79771e9/yellow-paper-berlin.pdf) 
+
+If I had more time to work on the solution, I would refactor all ExecutionPayload instances to work with the localExecutionPayload 
